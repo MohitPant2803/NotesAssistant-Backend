@@ -42,17 +42,24 @@ def get_groq_client(user_key: str = None):
             detail=f"Failed to initialize Groq client: {str(e)}"
         )
 
-async def transcribe_audio(audio_bytes: bytes, user_key: str = None) -> str:
+async def transcribe_audio(audio_bytes: bytes, user_key: str = None):
     client = get_groq_client(user_key)
     
     # Run the synchronous Groq API call in a thread pool to prevent blocking the async event loop
     def sync_transcribe():
-        return client.audio.transcriptions.create(
+        raw_response = client.audio.transcriptions.with_raw_response.create(
             model="whisper-large-v3-turbo",
             file=("chunk.webm", audio_bytes),  # Explicitly pass chunk.webm filename to inform Groq of the format
             language="en",
             response_format="text"
         )
+        headers = raw_response.headers
+        text = raw_response.parse()
+        
+        remaining = headers.get("x-ratelimit-remaining-requests")
+        limit = headers.get("x-ratelimit-limit-requests")
+        
+        return text, remaining, limit
         
     try:
         return await run_in_threadpool(sync_transcribe)
@@ -72,8 +79,12 @@ async def transcribe(file: UploadFile = File(...), authorization: str = Header(N
     if authorization and authorization.startswith("Bearer "):
         user_key = authorization.replace("Bearer ", "").strip()
 
-    transcribed_text = await transcribe_audio(audio_bytes, user_key)
-    return {"text": transcribed_text}
+    transcribed_text, remaining, limit = await transcribe_audio(audio_bytes, user_key)
+    return {
+        "text": transcribed_text,
+        "remaining_requests": int(remaining) if remaining else None,
+        "limit_requests": int(limit) if limit else None
+    }
 
 @app.get("/health")
 def health():
