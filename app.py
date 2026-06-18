@@ -22,15 +22,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from fastapi import Header
+
 # Initialize Groq client
-# Reads GROQ_API_KEY from environment automatically.
-# We create a helper function to get the client or throw an error if the key is missing.
-def get_groq_client():
-    api_key = os.environ.get("GROQ_API_KEY")
+# We create a helper function to get the client, using the user-provided key if present,
+# otherwise falling back to the server environment variable.
+def get_groq_client(user_key: str = None):
+    api_key = user_key or os.environ.get("GROQ_API_KEY")
     if not api_key:
         raise HTTPException(
-            status_code=500,
-            detail="GROQ_API_KEY environment variable is not set on the server."
+            status_code=400,
+            detail="Groq API Key is missing. Please provide it in the frontend settings or configure it on the server."
         )
     try:
         return Groq(api_key=api_key)
@@ -40,8 +42,8 @@ def get_groq_client():
             detail=f"Failed to initialize Groq client: {str(e)}"
         )
 
-async def transcribe_audio(audio_bytes: bytes) -> str:
-    client = get_groq_client()
+async def transcribe_audio(audio_bytes: bytes, user_key: str = None) -> str:
+    client = get_groq_client(user_key)
     
     # Run the synchronous Groq API call in a thread pool to prevent blocking the async event loop
     def sync_transcribe():
@@ -61,14 +63,19 @@ async def transcribe_audio(audio_bytes: bytes) -> str:
         )
 
 @app.post("/transcribe")
-async def transcribe(file: UploadFile = File(...)):
+async def transcribe(file: UploadFile = File(...), authorization: str = Header(None)):
     audio_bytes = await file.read()
     if not audio_bytes or len(audio_bytes) == 0:
         raise HTTPException(status_code=400, detail="Empty audio chunk received.")
         
-    transcribed_text = await transcribe_audio(audio_bytes)
+    user_key = None
+    if authorization and authorization.startswith("Bearer "):
+        user_key = authorization.replace("Bearer ", "").strip()
+
+    transcribed_text = await transcribe_audio(audio_bytes, user_key)
     return {"text": transcribed_text}
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
