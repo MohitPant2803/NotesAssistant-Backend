@@ -1,5 +1,6 @@
 import os
 import re
+import httpx
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
@@ -232,40 +233,48 @@ async def summarize(request: SummarizeRequest, authorization: str = Header(None)
 
 @app.post("/check-quota")
 async def check_quota(authorization: str = Header(None)):
+    """
+    Check remaining Groq quota without burning any audio credits.
+    We hit the cheap /openai/v1/models endpoint which returns the same
+    x-ratelimit-* response headers as transcription calls.
+    """
     user_key = None
     if authorization and authorization.startswith("Bearer "):
         user_key = authorization.replace("Bearer ", "").strip()
-        
-    client = get_groq_client(user_key)
-    
-    # 0.1-second silent mono 16kHz PCM WAV file
-    tiny_wav = (
-        b'RIFF\xa4\x0c\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80>\x00\x00'
-        b'\x00}\x00\x00\x02\x00\x10\x00data\x80\x0c\x00\x00' + b'\x00' * 3200
-    )
-    
-    def sync_check():
-        raw_response = client.audio.transcriptions.with_raw_response.create(
-            model="whisper-large-v3-turbo",
-            file=("silence.wav", tiny_wav),
-            language="en",
-            response_format="text"
+
+    api_key = user_key or os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Groq API Key is missing."
         )
-        headers = raw_response.headers
-        remaining = headers.get("x-ratelimit-remaining-requests")
-        limit = headers.get("x-ratelimit-limit-requests")
-        return remaining, limit
 
     try:
-        remaining, limit = await run_in_threadpool(sync_check)
-        return {
-            "remaining_requests": int(remaining) if remaining else None,
-            "limit_requests": int(limit) if limit else None
-        }
-    except Exception as e:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"}
+            )
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Groq API error: {response.text}"
+                )
+            headers = response.headers
+            remaining = headers.get("x-ratelimit-remaining-requests")
+            limit = headers.get("x-ratelimit-limit-requests")
+            remaining_seconds = headers.get("x-ratelimit-remaining-tokens")  # audio seconds for Whisper
+            limit_seconds = headers.get("x-ratelimit-limit-tokens")
+            return {
+                "remaining_requests": int(remaining) if remaining else None,
+                "limit_requests": int(limit) if limit else None,
+                "remaining_seconds": int(remaining_seconds) if remaining_seconds else None,
+                "limit_seconds": int(limit_seconds) if limit_seconds else None,
+            }
+    except httpx.RequestError as e:
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to check quota: {str(e)}"
+            status_code=503,
+            detail=f"Could not reach Groq API: {str(e)}"
         )
 
 @app.get("/health")
