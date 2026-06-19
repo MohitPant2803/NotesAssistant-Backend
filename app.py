@@ -23,6 +23,7 @@ app.add_middleware(
 )
 
 from fastapi import Header
+from pydantic import BaseModel
 
 # Initialize Groq client
 # We create a helper function to get the client, using the user-provided key if present,
@@ -85,6 +86,56 @@ async def transcribe(file: UploadFile = File(...), authorization: str = Header(N
         "remaining_requests": int(remaining) if remaining else None,
         "limit_requests": int(limit) if limit else None
     }
+
+class SummarizeRequest(BaseModel):
+    text: str
+
+@app.post("/summarize")
+async def summarize(request: SummarizeRequest, authorization: str = Header(None)):
+    text = request.text
+    if not text or not text.strip():
+        raise HTTPException(status_code=400, detail="Empty text received.")
+        
+    user_key = None
+    if authorization and authorization.startswith("Bearer "):
+        user_key = authorization.replace("Bearer ", "").strip()
+        
+    client = get_groq_client(user_key)
+    
+    def sync_summarize():
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an expert transcriber and editor. Your task is to clean up, format, and structure the following raw spoken transcript into a highly readable, detailed document.\n"
+                        "CRITICAL REQUIREMENT: Do NOT summarize, condense, or omit any details, arguments, examples, or spoken content. The user needs the full detailed transcript.\n"
+                        "Perform the following formatting tasks:\n"
+                        "1. Insert logical paragraph breaks and structure the text with clear Markdown headings (e.g. #, ##, ###) based on the topics discussed.\n"
+                        "2. Fix grammatical errors, run-on sentences, and remove filler words (like 'um', 'uh', 'like') while keeping the exact meaning and detailed content.\n"
+                        "3. Highlight key terms, definitions, or important concepts in bold.\n"
+                        "4. Use bullet points or lists where structured lists are spoken.\n"
+                        "Ensure the output is clean, professional, and retains 100% of the transcribed details and spoken text."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": f"Transcript:\n\n{text}"
+                }
+            ],
+            temperature=0.3
+        )
+        return completion.choices[0].message.content
+
+    try:
+        summary_text = await run_in_threadpool(sync_summarize)
+        return {"summary": summary_text}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Groq API formatting failed: {str(e)}"
+        )
 
 @app.get("/health")
 def health():
