@@ -1,4 +1,5 @@
 import os
+import re
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
@@ -111,7 +112,9 @@ async def summarize(request: SummarizeRequest, authorization: str = Header(None)
                     "content": (
                         "You are an expert transcriber and editor. Your task is to clean up, format, and structure the following raw spoken transcript into a highly readable, detailed document.\n"
                         "CRITICAL REQUIREMENT: Do NOT summarize, condense, or omit any details, arguments, examples, or spoken content. The user needs the full detailed transcript.\n"
-                        "Perform the following formatting tasks:\n"
+                        "FIRST, output exactly one line in this format (no extra text before it):\n"
+                        "TITLE: <a concise, specific title for the ENTIRE document, 4-8 words, based on the overall topic discussed, not just the first point made>\n"
+                        "Then on the next line, begin the formatted document. Perform the following formatting tasks:\n"
                         "1. Insert logical paragraph breaks and structure the text with clear Markdown headings (e.g. #, ##, ###) based on the topics discussed.\n"
                         "2. Fix grammatical errors, run-on sentences, and remove filler words (like 'um', 'uh', 'like') while keeping the exact meaning and detailed content.\n"
                         "3. Highlight key terms, definitions, or important concepts in bold.\n"
@@ -129,8 +132,22 @@ async def summarize(request: SummarizeRequest, authorization: str = Header(None)
         return completion.choices[0].message.content
 
     try:
-        summary_text = await run_in_threadpool(sync_summarize)
-        return {"summary": summary_text}
+        raw_output = await run_in_threadpool(sync_summarize)
+        
+        # Split out the TITLE line from the rest of the content
+        match = re.match(r"^TITLE:\s*(.+?)\n+(.*)", raw_output, re.DOTALL)
+        if match:
+            generated_title = match.group(1).strip()
+            formatted_content = match.group(2).strip()
+        else:
+            # Fallback if the model didn't follow the format
+            generated_title = "Untitled Note"
+            formatted_content = raw_output
+
+        return {
+            "title": generated_title,
+            "content": formatted_content
+        }
     except Exception as e:
         raise HTTPException(
             status_code=500,
