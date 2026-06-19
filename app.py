@@ -133,8 +133,10 @@ async def summarize(request: SummarizeRequest, authorization: str = Header(None)
                         "7. HIGHLIGHT BOXES: Use Markdown blockquote syntax (lines starting with '>') for the 2-5 most "
                         "important takeaways, warnings, or insights in the document. Format each as:\n"
                         "   > 💡 **Key Insight:** <the insight, one or two sentences>\n"
-                        "   Use this sparingly — only for genuinely important points, not every paragraph.\n\n"
-                        "Do not omit substantive content, but you SHOULD condense redundant or repetitive spoken passages "
+                        "   Use this sparingly — only for genuinely important points, not every paragraph.\n"
+                        "8. EXCLUSIONS: Explicitly exclude any jokes, banter, tangents, small talk, or sponsor reads. "
+                        "Focus entirely on the educational/informational core of the talk.\n\n"
+                        "Do not omit on-topic substantive content, but you SHOULD condense redundant or repetitive spoken passages "
                         "into tighter, clearer writing rather than transcribing them in full."
                     )
                 },
