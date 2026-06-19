@@ -110,16 +110,32 @@ async def summarize(request: SummarizeRequest, authorization: str = Header(None)
                 {
                     "role": "system",
                     "content": (
-                        "You are an expert transcriber and editor. Your task is to clean up, format, and structure the following raw spoken transcript into a highly readable, detailed document.\n"
-                        "CRITICAL REQUIREMENT: Do NOT summarize, condense, or omit any details, arguments, examples, or spoken content. The user needs the full detailed transcript.\n"
+                        "You are an expert content editor who turns raw spoken transcripts into a polished, "
+                        "detailed study summary — not a verbatim cleanup, and not a shallow summary either. "
+                        "Aim for the depth a top student's notes would have: every important point, argument, "
+                        "and example preserved, but rewritten in clear, professional language, with filler and "
+                        "repetition removed.\n\n"
                         "FIRST, output exactly one line in this format (no extra text before it):\n"
-                        "TITLE: <a concise, specific title for the ENTIRE document, 4-8 words, based on the overall topic discussed, not just the first point made>\n"
-                        "Then on the next line, begin the formatted document. Perform the following formatting tasks:\n"
-                        "1. Insert logical paragraph breaks and structure the text with clear Markdown headings (e.g. #, ##, ###) based on the topics discussed.\n"
-                        "2. Fix grammatical errors, run-on sentences, and remove filler words (like 'um', 'uh', 'like') while keeping the exact meaning and detailed content.\n"
-                        "3. Highlight key terms, definitions, or important concepts in bold.\n"
-                        "4. Use bullet points or lists where structured lists are spoken.\n"
-                        "Ensure the output is clean, professional, and retains 100% of the transcribed details and spoken text."
+                        "TITLE: <a concise, specific title for the ENTIRE document, 4-8 words, based on the overall topic>\n\n"
+                        "Then on the next line, write the document using these rules:\n\n"
+                        "1. STRUCTURE: Use Markdown headings (#, ##, ###) to organize by topic.\n"
+                        "2. LANGUAGE: Rewrite spoken sentences into clean, well-formed prose. Do not just trim filler words — "
+                        "actually restate ideas more clearly and concisely where the original phrasing was rambling or repetitive.\n"
+                        "3. EMPHASIS: Bold key terms, names, and concepts.\n"
+                        "4. LISTS: Use bullet points for enumerated items.\n"
+                        "5. CODE & FORMULAS: If the topic involves code, technical steps, mathematical formulas, or "
+                        "structured data, include them in fenced code blocks using triple backticks, even if the speaker "
+                        "only described them verbally rather than writing them out. Reconstruct them accurately based on context.\n"
+                        "6. EXTRA HELPFUL CONTEXT: Where it adds genuine value, supplement the transcript with brief "
+                        "relevant context the speaker didn't explicitly say (e.g. defining a technical term, naming the "
+                        "tool/concept being referenced, adding a clarifying example) — but clearly keep this additive, "
+                        "never contradicting or replacing what was actually said.\n"
+                        "7. HIGHLIGHT BOXES: Use Markdown blockquote syntax (lines starting with '>') for the 2-5 most "
+                        "important takeaways, warnings, or insights in the document. Format each as:\n"
+                        "   > 💡 **Key Insight:** <the insight, one or two sentences>\n"
+                        "   Use this sparingly — only for genuinely important points, not every paragraph.\n\n"
+                        "Do not omit substantive content, but you SHOULD condense redundant or repetitive spoken passages "
+                        "into tighter, clearer writing rather than transcribing them in full."
                     )
                 },
                 {
@@ -127,7 +143,7 @@ async def summarize(request: SummarizeRequest, authorization: str = Header(None)
                     "content": f"Transcript:\n\n{text}"
                 }
             ],
-            temperature=0.3
+            temperature=0.4
         )
         return completion.choices[0].message.content
 
