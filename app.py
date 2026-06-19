@@ -115,9 +115,15 @@ async def summarize(request: SummarizeRequest, authorization: str = Header(None)
                         "Aim for the depth a top student's notes would have: every important point, argument, "
                         "and example preserved, but rewritten in clear, professional language, with filler and "
                         "repetition removed.\n\n"
-                        "FIRST, output exactly one line in this format (no extra text before it):\n"
-                        "TITLE: <a concise, specific title for the ENTIRE document, 4-8 words, based on the overall topic>\n\n"
-                        "Then on the next line, write the document using these rules:\n\n"
+                        "Output in exactly this structure:\n\n"
+                        "TITLE: <a concise, specific title for the ENTIRE document, 4-8 words, based on the overall topic>\n"
+                        "TLDR:\n"
+                        "- <first essential takeaway, one sentence>\n"
+                        "- <second essential takeaway, one sentence>\n"
+                        "- <third essential takeaway, one sentence>\n"
+                        "---\n"
+                        "<then the full formatted document>\n\n"
+                        "Rules for the full document:\n"
                         "1. STRUCTURE: Use Markdown headings (#, ##, ###) to organize by topic.\n"
                         "2. LANGUAGE: Rewrite spoken sentences into clean, well-formed prose. Do not just trim filler words — "
                         "actually restate ideas more clearly and concisely where the original phrasing was rambling or repetitive.\n"
@@ -127,17 +133,21 @@ async def summarize(request: SummarizeRequest, authorization: str = Header(None)
                         "structured data, include them in fenced code blocks using triple backticks, even if the speaker "
                         "only described them verbally rather than writing them out. Reconstruct them accurately based on context.\n"
                         "6. EXTRA HELPFUL CONTEXT: Where it adds genuine value, supplement the transcript with brief "
-                        "relevant context the speaker didn't explicitly say (e.g. defining a technical term, naming the "
-                        "tool/concept being referenced, adding a clarifying example) — but clearly keep this additive, "
-                        "never contradicting or replacing what was actually said.\n"
-                        "7. HIGHLIGHT BOXES: Use Markdown blockquote syntax (lines starting with '>') for the 2-5 most "
-                        "important takeaways, warnings, or insights in the document. Format each as:\n"
-                        "   > 💡 **Key Insight:** <the insight, one or two sentences>\n"
-                        "   Use this sparingly — only for genuinely important points, not every paragraph.\n"
-                        "8. EXCLUSIONS: Explicitly exclude any jokes, banter, tangents, small talk, or sponsor reads. "
-                        "Focus entirely on the educational/informational core of the talk.\n\n"
-                        "Do not omit on-topic substantive content, but you SHOULD condense redundant or repetitive spoken passages "
-                        "into tighter, clearer writing rather than transcribing them in full."
+                        "relevant context the speaker didn't explicitly say — but keep this additive, never contradicting "
+                        "or replacing what was actually said.\n"
+                        "7. HIGHLIGHT BOXES: Use Markdown blockquote syntax (lines starting with '>') for the most important "
+                        "points. Use ONE of these four labels depending on what kind of point it is:\n"
+                        "   > **Key Insight:** <an important realization or core idea>\n"
+                        "   > **Definition:** <a technical term or concept being explained>\n"
+                        "   > **Common Mistake:** <a pitfall or warning the speaker mentioned>\n"
+                        "   > **Action Item:** <something concrete the reader/listener should do>\n"
+                        "   Use these sparingly — 3-6 total across the document, only for genuinely important points.\n"
+                        "8. OMIT IRRELEVANT CONTENT: Leave out jokes, banter, off-topic tangents, small talk, "
+                        "filler anecdotes, sponsor reads/ads, and any other content that doesn't contribute to the "
+                        "actual subject matter.\n\n"
+                        "Do not omit substantive, on-topic content — but you SHOULD condense redundant or repetitive "
+                        "spoken passages into tighter, clearer writing, and you SHOULD fully drop the off-topic material "
+                        "described in rule 8."
                     )
                 },
                 {
@@ -152,18 +162,30 @@ async def summarize(request: SummarizeRequest, authorization: str = Header(None)
     try:
         raw_output = await run_in_threadpool(sync_summarize)
         
-        # Split out the TITLE line from the rest of the content
-        match = re.match(r"^TITLE:\s*(.+?)\n+(.*)", raw_output, re.DOTALL)
-        if match:
-            generated_title = match.group(1).strip()
-            formatted_content = match.group(2).strip()
-        else:
-            # Fallback if the model didn't follow the format
-            generated_title = "Untitled Note"
+        # --- Parse TITLE ---
+        title_match = re.search(r"^TITLE:\s*(.+)$", raw_output, re.MULTILINE)
+        generated_title = title_match.group(1).strip() if title_match else "Untitled Note"
+
+        # --- Parse TLDR bullets (between "TLDR:" and the "---" delimiter) ---
+        tldr_match = re.search(r"TLDR:\s*\n(.*?)\n---\s*\n", raw_output, re.DOTALL)
+        tldr_bullets = []
+        if tldr_match:
+            for line in tldr_match.group(1).split("\n"):
+                line = line.strip()
+                if line.startswith("- "):
+                    tldr_bullets.append(line[2:].strip())
+
+        # --- Everything after the "---" delimiter is the main content ---
+        content_match = re.search(r"\n---\s*\n(.*)", raw_output, re.DOTALL)
+        formatted_content = content_match.group(1).strip() if content_match else raw_output
+
+        # Fallback: if parsing failed entirely, just use the raw output as content
+        if not title_match and not tldr_match and not content_match:
             formatted_content = raw_output
 
         return {
             "title": generated_title,
+            "tldr": tldr_bullets,
             "content": formatted_content
         }
     except Exception as e:
