@@ -154,6 +154,44 @@ async def summarize(request: SummarizeRequest, authorization: str = Header(None)
             detail=f"Groq API formatting failed: {str(e)}"
         )
 
+@app.post("/check-quota")
+async def check_quota(authorization: str = Header(None)):
+    user_key = None
+    if authorization and authorization.startswith("Bearer "):
+        user_key = authorization.replace("Bearer ", "").strip()
+        
+    client = get_groq_client(user_key)
+    
+    # 0.1-second silent mono 16kHz PCM WAV file
+    tiny_wav = (
+        b'RIFF\xa4\x0c\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80>\x00\x00'
+        b'\x00}\x00\x00\x02\x00\x10\x00data\x80\x0c\x00\x00' + b'\x00' * 3200
+    )
+    
+    def sync_check():
+        raw_response = client.audio.transcriptions.with_raw_response.create(
+            model="whisper-large-v3-turbo",
+            file=("silence.wav", tiny_wav),
+            language="en",
+            response_format="text"
+        )
+        headers = raw_response.headers
+        remaining = headers.get("x-ratelimit-remaining-requests")
+        limit = headers.get("x-ratelimit-limit-requests")
+        return remaining, limit
+
+    try:
+        remaining, limit = await run_in_threadpool(sync_check)
+        return {
+            "remaining_requests": int(remaining) if remaining else None,
+            "limit_requests": int(limit) if limit else None
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to check quota: {str(e)}"
+        )
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
