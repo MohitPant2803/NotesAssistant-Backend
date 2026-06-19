@@ -183,10 +183,46 @@ async def summarize(request: SummarizeRequest, authorization: str = Header(None)
         if not title_match and not tldr_match and not content_match:
             formatted_content = raw_output
 
+        # --- Second LLM Call to condense to 1-page ---
+        def sync_condense():
+            one_page_completion = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are condensing a detailed document into a single-page executive summary "
+                            "(target: 300-450 words total, must fit comfortably on one printed page).\n\n"
+                            "Rules:\n"
+                            "1. Use Markdown. Start with one or two short paragraphs covering the core topic, "
+                            "then a '## Key Points' section with 4-7 bullet points covering the most important "
+                            "specifics (numbers, names, decisions, conclusions).\n"
+                            "2. Bold the most important terms.\n"
+                            "3. Include AT MOST one highlight box using this format for the single most important "
+                            "takeaway in the whole document:\n"
+                            "   > **Key Insight:** <one sentence>\n"
+                            "4. Do NOT include code blocks, multiple sub-headings, or any content that won't fit "
+                            "on one page. Be ruthless about cutting detail — this is a skim-read summary, not the "
+                            "full document.\n"
+                            "5. Do not add a title line — just start directly with the content."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Detailed document to condense:\n\n{formatted_content}"
+                    }
+                ],
+                temperature=0.4
+            )
+            return one_page_completion.choices[0].message.content.strip()
+
+        one_page_summary = await run_in_threadpool(sync_condense)
+
         return {
             "title": generated_title,
             "tldr": tldr_bullets,
-            "content": formatted_content
+            "content": formatted_content,
+            "one_page_summary": one_page_summary
         }
     except Exception as e:
         raise HTTPException(
